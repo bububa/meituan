@@ -108,6 +108,7 @@ type Order struct {
 	// ConsumeProfitList 核销佣金明细结构
 	ConsumeProfitList []ConsumeProfit `json:"consumeProfitList,omitempty"`
 	// CidInfo cid扩展信息
+	CidInfo *CidInfo `json:"cidInfo,omitempty"`
 }
 
 // RefundInfo 退款信息
