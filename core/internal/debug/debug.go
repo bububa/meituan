@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/bububa/meituan/util"
+	"github.com/bububa/meituan/v2/util"
 )
 
 // PrintError print error with debug

@@ -3,7 +3,7 @@ package model
 import (
 	"strconv"
 
-	"github.com/bububa/meituan/util"
+	"github.com/bububa/meituan/v2/util"
 )
 
 // Response api response interface
@@ -16,25 +16,18 @@ type Response interface {
 
 // BaseResponse shared api response data fields
 type BaseResponse struct {
-	// Des 异常描述信息
-	Des string `json:"des,omitempty"`
-	// Msg 异常描述信息
-	Msg string `json:"msg,omitempty"`
-	// Status 状态值，0为成功，非0为异常
-	Status int `json:"status,omitempty"`
 	// Code 状态值，0为成功，非0为异常
 	Code int `json:"code,omitempty"`
+	// Message 响应文案
+	Message string `json:"Message,omitempty"`
 }
 
 // IsError implement Response interface
 func (r BaseResponse) IsError() bool {
-	return r.Status != 0 || r.Code != 0
+	return r.Code != 0
 }
 
 // Error implement Response interface
 func (r BaseResponse) Error() string {
-	if r.Code != 0 {
-		return util.StringsJoin(strconv.Itoa(r.Code), ":", r.Msg)
-	}
-	return util.StringsJoin(strconv.Itoa(r.Status), ":", r.Des)
+	return util.StringsJoin(strconv.Itoa(r.Code), ":", r.Message)
 }

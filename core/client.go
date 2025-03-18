@@ -2,14 +2,19 @@ package core
 
 import (
 	"context"
+	"crypto/hmac"
+	"crypto/md5"
+	"crypto/sha256"
+	"encoding/base64"
 	"errors"
 	"net/http"
+	"strconv"
 	"sync"
 	"time"
 
-	"github.com/bububa/meituan/core/internal/debug"
-	"github.com/bububa/meituan/model"
-	"github.com/bububa/meituan/util"
+	"github.com/bububa/meituan/v2/core/internal/debug"
+	"github.com/bububa/meituan/v2/model"
+	"github.com/bububa/meituan/v2/util"
 )
 
 var (
@@ -33,12 +38,11 @@ func defaultHttpClient() *http.Client {
 
 // SDKClient sdk client
 type SDKClient struct {
-	client  *http.Client
-	tracer  *Otel
-	limiter RateLimiter
-	appKey  string
-	secret  string
-	debug   bool
+	client *http.Client
+	tracer *Otel
+	appKey string
+	secret string
+	debug  bool
 }
 
 // NewSDKClient 创建SDKClient
@@ -60,11 +64,6 @@ func (c *SDKClient) SetHttpClient(client *http.Client) {
 	c.client = client
 }
 
-// SetRateLimiter 设置限流
-func (c *SDKClient) SetRateLimiter(limiter RateLimiter) {
-	c.limiter = limiter
-}
-
 func (c *SDKClient) WithTracer(namespace string) {
 	c.tracer = NewOtel(namespace, c.appKey)
 }
@@ -81,28 +80,38 @@ func (c *SDKClient) Copy() *SDKClient {
 }
 
 // Get get api
-func (c *SDKClient) Get(ctx context.Context, gw string, req model.GetRequest, resp model.Response) error {
-	return c.get(ctx, BASE_URL, gw, req, resp)
+func (c *SDKClient) POST(ctx context.Context, gw string, req model.PostRequest, resp model.Response) error {
+	return c.post(ctx, BASE_URL, gw, req, resp)
 }
 
-func (c *SDKClient) get(ctx context.Context, base string, gw string, req model.GetRequest, resp model.Response) error {
-	reqUrl := util.StringsJoin(base, gw)
-	if req != nil {
-		values := util.GetUrlValues()
-		values.Set("appkey", c.appKey)
-		req.Values(values)
-		c.sign(values)
-		reqUrl = util.StringsJoin(reqUrl, "?", values.Encode())
-		util.PutUrlValues(values)
-	}
-	debug.PrintGetRequest(reqUrl, c.debug)
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, reqUrl, nil)
+func (c *SDKClient) post(ctx context.Context, base string, gw string, req model.PostRequest, resp model.Response) error {
+	reqPath := util.StringsJoin(BASE_PATH, gw)
+	reqUrl := util.StringsJoin(base, reqPath)
+	buffer := util.GetBufferPool()
+	defer util.PutBufferPool(buffer)
+	req.Encode(buffer)
+	ts := time.Now().UnixMilli()
+	tsStr := strconv.FormatInt(ts, 10)
+	md5Hash := md5.Sum(buffer.Bytes())
+	contentMD5 := base64.StdEncoding.EncodeToString(md5Hash[:])
+	stringToSign := util.StringsJoin("POST\n", contentMD5, "\nS-Ca-App:", c.appKey, "\nS-Ca-Timestamp:", tsStr, "\n", reqPath)
+
+	signH := hmac.New(sha256.New, []byte(c.secret))
+	signH.Write([]byte(stringToSign))
+	signature := base64.StdEncoding.EncodeToString(signH.Sum(nil))
+
+	debug.PrintPostJSONRequest(reqUrl, buffer.Bytes(), c.debug)
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, reqUrl, buffer)
 	if err != nil {
 		return err
 	}
-	if c.limiter != nil {
-		c.limiter.Take()
-	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("S-Ca-App", c.appKey)
+	httpReq.Header.Set("S-Ca-Signature", c.appKey)
+	httpReq.Header.Set("S-Ca-Timestamp", tsStr)
+	httpReq.Header.Set("Content-MD5", contentMD5)
+	httpReq.Header.Set("S-Ca-Signature", signature)
+	httpReq.Header.Set("S-Ca-Signature-Headers", "S-Ca-Timestamp,S-Ca-App")
 	return c.WithSpan(ctx, httpReq, resp, nil, c.fetch)
 }
 
@@ -123,8 +132,8 @@ func (c *SDKClient) fetch(httpReq *http.Request, resp model.Response) (*http.Res
 	if err != nil {
 		debug.PrintError(err, c.debug)
 		return httpResp, errors.Join(err, model.BaseResponse{
-			Status: httpResp.StatusCode,
-			Des:    string(body),
+			Code:    httpResp.StatusCode,
+			Message: string(body),
 		})
 	}
 	if resp.IsError() {
