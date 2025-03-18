@@ -1,4 +1,4 @@
-module github.com/bububa/meituan
+module github.com/bububa/meituan/v2
 
 go 1.23.1
 
